@@ -9,6 +9,7 @@
 ![MediaPipe](https://img.shields.io/badge/MediaPipe-Hand%20%26%20Face%20Landmarker-0097A7)
 ![OpenCV](https://img.shields.io/badge/OpenCV-4.x-5C3EE8?logo=opencv&logoColor=white)
 ![Plataforma](https://img.shields.io/badge/plataforma-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
+[![Licencia: MIT](https://img.shields.io/badge/licencia-MIT-green)](LICENSE)
 
 </div>
 
@@ -210,3 +211,7 @@ Se ejecutan automáticamente en GitHub Actions en cada push.
 - [MediaPipe](https://ai.google.dev/edge/mediapipe) — Hand Landmarker y Face Landmarker.
 - [OpenCV](https://opencv.org/) — captura y dibujo.
 - Casiez et al., [*1€ Filter*](https://gery.casiez.net/1euro/) (CHI 2012) — suavizado del puntero.
+
+## 📄 Licencia
+
+Distribuido bajo la licencia [MIT](LICENSE).

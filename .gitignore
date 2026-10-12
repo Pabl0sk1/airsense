@@ -1,0 +1,22 @@
+# Entorno y caches de Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Modelos (se descargan con download_models.py)
+models/*.task
+models/*.part
+models/*.caffemodel
+models/*.onnx
+
+# Salidas de la app (dibujos, capturas, estadisticas, logs)
+output/
+*.log
+
+# Editores / SO
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

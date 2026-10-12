@@ -39,6 +39,12 @@ DWELL_BUTTON = 0.7    # tiempo apuntando a un boton de la barra para activarlo
 
 GESTURE_STABLE_FRAMES = 3   # inferencias seguidas con el mismo gesto para aceptarlo
 DRAW_STOP_FRAMES = 6        # inferencias con otro gesto "dudoso" antes de cortar un trazo
+# Recorte de la "cola" del trazo: al cerrar la mano, sacarla de la camara o ir a la barra
+# superior, el dedo sigue detectado un instante y deja una raya. Al terminar el trazo se
+# descartan los puntos de ese final:
+STROKE_TAIL_TRIM = 0.15     # s antes de que el gesto empezara a dejar de ser "indice"
+HAND_LOST_TRIM = 0.30       # s antes de perder la mano
+TOOLBAR_TRIM_MAX = 0.8      # s maximos del tramo final subiendo hacia la barra superior
 # Filtro One Euro del puntero: min_cutoff bajo = mas suave en reposo; beta alto = menos retraso al moverse
 POINTER_MIN_CUTOFF = 1.2
 POINTER_BETA = 0.03
@@ -47,6 +53,11 @@ FACE_EVERY_N_FRAMES = 2     # el analisis facial se ejecuta 1 de cada N inferenc
 ENHANCE_IMAGE = True        # realce ligero de nitidez y contraste del video
 HUD_TEXT_REFRESH = 6        # el texto de los paneles se vuelve a renderizar 1 de cada N frames
 EMOTION_SMOOTHING = 0.15    # EMA de las puntuaciones de emocion
+
+# Easter eggs: dibujar ciertas figuras lanza una lluvia de emojis
+EASTER_EGGS = True
+EASTER_EGG_WINDOW = 25.0    # s: solo se tienen en cuenta los trazos recientes
+RAIN_DURATION = 3.0         # s que dura la lluvia
 
 # Colores de la interfaz (BGR)
 UI_BG = (22, 20, 18)

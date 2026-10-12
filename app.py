@@ -35,8 +35,10 @@ from airsense import config as C  # noqa: E402
 from airsense import ui  # noqa: E402
 from airsense.camera import open_source  # noqa: E402
 from airsense.canvas import Canvas  # noqa: E402
+from airsense.effects import EmojiRain  # noqa: E402
 from airsense.face import FaceAnalyzer  # noqa: E402
 from airsense.hands import GestureStabilizer, HandTracker, OneEuroFilter2D  # noqa: E402
+from airsense.shapes import easter_egg_recognizer, find_shape  # noqa: E402
 from airsense.stats import SessionStats  # noqa: E402
 
 WINDOW = "AirSense"
@@ -50,6 +52,11 @@ HOLD_ACTIONS = {
 
 # Gestos que cortan un trazo inmediatamente (los demas necesitan DRAW_STOP_FRAMES seguidos)
 DRAW_STOP_NOW = {"peace", "open", "fist", "pinch"}
+
+EASTER_EGG_TOASTS = {
+    "cup": ("¡Hora del café!", (60, 140, 200)),
+    "heart": ("¡Amor en el aire!", (110, 80, 240)),
+}
 
 MODE_TEXT = {
     "point": ("DIBUJANDO", (80, 230, 120)),
@@ -160,6 +167,7 @@ class HandState:
         self.last_gesture = "unknown"
         self.pointer = None
         self.non_point_frames = 0
+        self.tentative_since = None   # desde cuando el gesto crudo dejo de ser "indice" mientras dibuja
 
     def reset(self):
         self.stab.reset()
@@ -168,6 +176,56 @@ class HandState:
         self.last_gesture = "unknown"
         self.pointer = None
         self.non_point_frames = 0
+        self.tentative_since = None
+
+
+class EasterEggs:
+    """Reconoce figuras (taza, corazon) en los ultimos trazos, en un hilo para no frenar el video."""
+
+    def __init__(self):
+        self.recognizer = None
+        self._thread = None
+        self._pending = False
+        self._result = None
+        self._lock = threading.Lock()
+
+    def check(self, canvas):
+        if self._thread is not None and self._thread.is_alive():
+            self._pending = True        # se revisara al terminar el analisis en curso
+            return
+        self._pending = False
+        now = time.perf_counter()
+        recent = [s for s in canvas.strokes
+                  if s.t_end is not None and not s.eraser and not s.recognized and len(s.points) >= 2
+                  and now - s.t_end < C.EASTER_EGG_WINDOW][-4:]
+        if not recent:
+            return
+        group = [(s, np.array(s.points, np.float64)) for s in recent]
+        self._thread = threading.Thread(target=self._run, args=(group,), daemon=True)
+        self._thread.start()
+
+    def _run(self, group):
+        if self.recognizer is None:
+            self.recognizer = easter_egg_recognizer()
+        label, k = find_shape(self.recognizer, [pts for _, pts in group])
+        if label is not None:
+            with self._lock:
+                self._result = (label, [s for s, _ in group[-k:]])
+
+    def poll(self, canvas):
+        """Devuelve la etiqueta reconocida (una sola vez) o None."""
+        if self._pending and not (self._thread is not None and self._thread.is_alive()):
+            self.check(canvas)
+        with self._lock:
+            r, self._result = self._result, None
+        if r is None:
+            return None
+        label, strokes = r
+        if not any(s in canvas.strokes for s in strokes):
+            return None                 # se borro el dibujo mientras se analizaba
+        for s in strokes:
+            s.recognized = True         # la misma figura no vuelve a disparar
+        return label
 
 
 class App:
@@ -184,6 +242,8 @@ class App:
         self.stats = SessionStats()
         self.toolbar = ui.Toolbar(C.FRAME_W)
         self.toast = ui.Toast()
+        self.eggs = EasterEggs() if C.EASTER_EGGS else None
+        self.rain = EmojiRain(C.FRAME_W, C.FRAME_H, duration=C.RAIN_DURATION)
 
         self.color_idx = 1
         self.brush = C.BRUSH_DEFAULT
@@ -227,13 +287,41 @@ class App:
             return
         self.tool = tool
         for i in range(2):
-            self.canvas.end(i)
+            self.end_stroke(i)
         if tool == "pen":
             self.toast.show("Lápiz activado: el índice dibuja", color=(80, 230, 120))
         elif tool == "eraser":
             self.toast.show("Borrador activado", color=(230, 60, 230))
         else:
             self.toast.show("Lápiz desactivado: el índice es cursor", color=C.UI_ACCENT)
+
+    def end_stroke(self, i, cutoff=None):
+        s = self.canvas.end(i, cutoff)
+        if s is not None and not s.eraser and self.eggs is not None:
+            self.eggs.check(self.canvas)
+
+    def stroke_cutoff(self, i, now, in_toolbar=False):
+        """Instante a partir del cual se descarta el final del trazo (ver STROKE_TAIL_TRIM)."""
+        st = self.hand_states[i]
+        base = st.tentative_since if st.tentative_since is not None else now
+        cutoff = base - C.STROKE_TAIL_TRIM
+        if in_toolbar:
+            run = self.canvas.tail_run_start(i, C.TOOLBAR_TRIM_MAX)
+            if run is not None:
+                cutoff = min(cutoff, run)
+        return cutoff
+
+    def update_easter_eggs(self):
+        if self.eggs is None:
+            return
+        label = self.eggs.poll(self.canvas)
+        if label is None:
+            return
+        self.rain.start(label)
+        msg, col = EASTER_EGG_TOASTS[label]
+        self.toast.show(msg, seconds=C.RAIN_DURATION, color=col)
+        self.stats.count_action(f"easter_egg_{label}")
+        print(f"[easter egg] {label}", flush=True)
 
     def do_action(self, name, frame_clean=None):
         if name == "clear":
@@ -307,6 +395,10 @@ class App:
             st.pointer = st.filt.update(hand.index_tip, t_now)
             # Histeresis del trazo: mientras se dibuja, gestos dudosos no cortan enseguida
             if self.canvas.is_drawing(i):
+                if raw == "point":
+                    st.tentative_since = None
+                elif st.tentative_since is None:
+                    st.tentative_since = t_now
                 if raw == "point" or g == "point":
                     st.non_point_frames = 0
                     g = "point"
@@ -318,13 +410,16 @@ class App:
                         g = "point"
             else:
                 st.non_point_frames = 0
+                st.tentative_since = None
             st.gesture = g
             if g != st.last_gesture:
                 if g != "unknown":
                     self.stats.count_gesture(g)
                 st.last_gesture = g
         for i in range(len(hands), 2):
-            self.canvas.end(i)
+            if self.canvas.is_drawing(i):
+                # mano perdida: el final suele ser la mano saliendo del encuadre
+                self.end_stroke(i, min(self.stroke_cutoff(i, t_now), t_now - C.HAND_LOST_TRIM))
             self.hand_states[i].reset()
 
     def process_hands(self, hands, frame_clean, new_result):
@@ -349,10 +444,11 @@ class App:
                 if not self.canvas.is_drawing(i):
                     self.canvas.begin(i, C.PALETTE[self.color_idx][1], self.brush, self.eraser)
                 if new_result:
-                    self.canvas.add_point(i, tip)
+                    self.canvas.add_point(i, tip, now)
                 drawing_any = True
             else:
-                self.canvas.end(i)
+                if self.canvas.is_drawing(i):
+                    self.end_stroke(i, self.stroke_cutoff(i, now, in_toolbar))
                 if g in ("point", "peace") and in_toolbar:
                     hover_candidate = self.toolbar.hit(tip)
                 if g == "pinch":
@@ -521,7 +617,9 @@ class App:
                 self.stats.update_face(face, new_face)
                 pt = self._prof("logica", pt)
 
+                self.update_easter_eggs()
                 self.draw_hud(frame, self.hands, face, info)
+                self.rain.draw(frame)
                 self.toast.draw(frame)
                 pt = self._prof("hud", pt)
 

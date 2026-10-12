@@ -29,6 +29,9 @@ para estimar tu emoción, contar parpadeos y sonrisas. Todo corre **en local, en
 - 🙂 **Estado de ánimo** en vivo (Feliz, Sorprendido, Triste, Enojado, Neutral) con línea de tiempo de 60 s.
 - 📊 **Estadísticas de sesión**: FPS, trazos, cobertura, velocidad del dedo, gestos usados, parpadeos/min…
   y un resumen **JSON** al salir.
+- ✂️ **Sin rayas accidentales**: al cerrar la mano, sacarla de la cámara o ir a la barra de botones,
+  el final involuntario del trazo se borra solo.
+- 🥚 **Easter eggs**: algunos dibujos esconden sorpresas… prueba a dibujar una ☕ taza de café o un ❤️ corazón.
 - ⚡ Fluido: el vídeo va a la velocidad de la cámara y la IA corre en un hilo aparte.
 
 ## 🚀 Inicio rápido
@@ -96,6 +99,17 @@ Elegir **Borrador** (o hacer el gesto rock) también activa el dibujo, en modo b
 
 Mientras mantienes un gesto aparece un **anillo de progreso** sobre la mano, así sabes cuándo se va a disparar la acción.
 
+### 🥚 Easter eggs
+
+| Dibuja… | Y pasa… |
+|---|---|
+| ☕ Una taza de café (cuerpo + asa, en uno o varios trazos) | 3 s de lluvia de tazas de café |
+| ❤️ Un corazón | 3 s de lluvia de corazones |
+
+Los dibujos se reconocen con el algoritmo [$P](https://depts.washington.edu/acelab/proj/dollar/pdollar.html)
+(nubes de puntos: no importa el orden ni el número de trazos), comparándolos con plantillas de tazas y
+corazones y con figuras "trampa" (U, rectángulo, círculo, casa…) para no dispararse por error.
+
 ### 3. Teclado
 
 | Tecla | Acción | Tecla | Acción |
@@ -145,6 +159,9 @@ Al salir se guarda un resumen en `output/sesion_<fecha>.json` (extracto de ejemp
 - **Inferencia asíncrona**: manos y rostro se procesan en segundo plano; el vídeo nunca se congela esperando a la IA.
 - **Gestos estables**: un gesto solo se acepta tras repetirse varias inferencias seguidas, y mientras dibujas
   un gesto dudoso no corta el trazo (histéresis). V, palma, puño y pinza lo cortan al instante.
+- **Recorte de la cola del trazo**: cada punto guarda su instante. Al terminar un trazo se descartan los
+  puntos desde que el gesto empezó a dejar de ser "índice" (menos 0,15 s), los últimos 0,3 s si se perdió
+  la mano, y el tramo final que sube hacia la barra si fuiste a pulsar un botón.
 - **Puntero suave**: filtro One Euro (quieto cuando estás quieto, sin retraso cuando te mueves rápido).
 - **Trazos curvos**: los puntos se unen con splines Catmull-Rom, por eso los trazos salen redondos aunque
   la IA entregue 15-20 posiciones por segundo.
@@ -160,6 +177,8 @@ Todo lo ajustable está en [`airsense/config.py`](airsense/config.py):
 | `PALETTE`, `BRUSH_*` | Colores y grosores del pincel |
 | `HOLD_*`, `DWELL_BUTTON` | Tiempo que hay que mantener cada gesto o apuntar a un botón |
 | `GESTURE_STABLE_FRAMES`, `DRAW_STOP_FRAMES` | Estabilidad de gestos y del trazo |
+| `STROKE_TAIL_TRIM`, `HAND_LOST_TRIM`, `TOOLBAR_TRIM_MAX` | Cuánto se recorta del final de un trazo |
+| `EASTER_EGGS`, `RAIN_DURATION` | Activar los easter eggs y duración de la lluvia |
 | `POINTER_MIN_CUTOFF`, `POINTER_BETA` | Suavidad vs. respuesta del puntero |
 | `FACE_EVERY_N_FRAMES` | Cada cuántas inferencias se analiza el rostro (ahorra CPU) |
 | `ENHANCE_IMAGE`, `HUD_TEXT_REFRESH` | Realce de imagen y refresco del texto de los paneles |
@@ -178,6 +197,8 @@ airsense/
 │   ├── face.py            emoción, parpadeos y sonrisas
 │   ├── canvas.py          lienzo, trazos, borrador, deshacer, guardado
 │   ├── stats.py           estadísticas de sesión y exportación JSON
+│   ├── shapes.py          reconocimiento de dibujos ($P) para los easter eggs
+│   ├── effects.py         lluvia de emojis
 │   └── ui.py              barra de herramientas, paneles y texto
 └── tests/                 tests unitarios (no necesitan cámara ni modelos)
 ```
@@ -190,7 +211,8 @@ pytest
 ```
 
 Cubren la clasificación de gestos (con manos sintéticas), el lienzo (trazos, borrador, deshacer, guardado),
-los filtros, la detección de emociones y parpadeos, las estadísticas y el lector de cámara.
+los filtros, la detección de emociones y parpadeos, las estadísticas, el lector de cámara,
+el recorte de trazos y el reconocimiento de tazas y corazones.
 Se ejecutan automáticamente en GitHub Actions en cada push.
 
 ## 🛠️ Solución de problemas
@@ -210,6 +232,7 @@ Se ejecutan automáticamente en GitHub Actions en cada push.
 
 - [MediaPipe](https://ai.google.dev/edge/mediapipe) — Hand Landmarker y Face Landmarker.
 - [OpenCV](https://opencv.org/) — captura y dibujo.
+- Vatavu, Anthony y Wobbrock, [*$P Point-Cloud Recognizer*](https://depts.washington.edu/acelab/proj/dollar/pdollar.html) (ICMI 2012) — reconocimiento de dibujos.
 - Casiez et al., [*1€ Filter*](https://gery.casiez.net/1euro/) (CHI 2012) — suavizado del puntero.
 
 ## 📄 Licencia

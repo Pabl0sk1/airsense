@@ -1,5 +1,7 @@
 """Lienzo de dibujo con trazos suavizados (Catmull-Rom), borrador, deshacer y guardado."""
+import bisect
 import math
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -8,14 +10,19 @@ import numpy as np
 
 
 class Stroke:
-    __slots__ = ("color", "thickness", "points", "eraser", "drawn")
+    __slots__ = ("color", "thickness", "points", "times", "eraser", "drawn", "t_end", "snapshot",
+                 "recognized")
 
     def __init__(self, color, thickness, eraser=False):
         self.color = color
         self.thickness = int(thickness)
         self.eraser = eraser
         self.points = []
+        self.times = []         # instante (perf_counter) de cada punto, para recortar la cola
         self.drawn = 0          # numero de segmentos ya rasterizados
+        self.t_end = None       # instante en que se termino el trazo
+        self.snapshot = None    # copia del lienzo antes del trazo (para recortarlo sin redibujar todo)
+        self.recognized = False  # ya formo parte de una figura reconocida (easter egg)
 
 
 class Canvas:
@@ -32,11 +39,13 @@ class Canvas:
     # -- trazos --------------------------------------------------------------
     def begin(self, hand_id, color, thickness, eraser=False):
         s = Stroke(color, thickness, eraser)
+        if not self.active:
+            s.snapshot = (self.layer.copy(), self.mask.copy())
         self.active[hand_id] = s
         self.strokes.append(s)
         return s
 
-    def add_point(self, hand_id, pt):
+    def add_point(self, hand_id, pt, t=None):
         s = self.active.get(hand_id)
         if s is None:
             return
@@ -44,18 +53,57 @@ class Canvas:
         if s.points and math.hypot(pt[0] - s.points[-1][0], pt[1] - s.points[-1][1]) < self.MIN_STEP:
             return
         s.points.append(pt)
+        s.times.append(time.perf_counter() if t is None else t)
         self.total_points += 1
         self._advance(s, final=False)
 
-    def end(self, hand_id):
+    def end(self, hand_id, cutoff=None):
+        """Termina el trazo. Con cutoff (perf_counter) se descartan los puntos posteriores:
+        asi se quita la "cola" que deja la mano al cerrarse o al alejarse del dibujo.
+        Devuelve el trazo si queda en el lienzo, o None."""
         s = self.active.pop(hand_id, None)
         if s is None:
-            return
+            return None
+        s.t_end = time.perf_counter()
+        trimmed = False
+        if cutoff is not None:
+            k = bisect.bisect_right(s.times, cutoff)
+            if k < len(s.points):
+                self.total_points -= len(s.points) - k
+                del s.points[k:]
+                del s.times[k:]
+                trimmed = True
         if len(s.points) == 0:
             if s in self.strokes:
                 self.strokes.remove(s)
-            return
-        self._advance(s, final=True)
+        if trimmed:
+            self._redraw_trimmed(s)
+        elif s.points:
+            self._advance(s, final=True)
+        s.snapshot = None
+        return s if s.points else None
+
+    def _redraw_trimmed(self, s):
+        if s.snapshot is not None and not self.active:
+            # restaurar el lienzo de antes del trazo y redibujar solo el trazo recortado
+            self.layer[:], self.mask[:] = s.snapshot
+            s.drawn = 0
+            if s.points:
+                self._advance(s, final=True)
+        else:
+            self._rebuild()
+
+    def tail_run_start(self, hand_id, max_s=0.8, tol=4):
+        """Instante en que empezo el ultimo tramo que sube sin parar hacia la barra superior
+        (como mucho max_s segundos atras). Sirve para no dejar la raya al ir a pulsar un boton."""
+        s = self.active.get(hand_id)
+        if s is None or len(s.points) < 2:
+            return None
+        i = len(s.points) - 1
+        t_last = s.times[-1]
+        while i > 0 and s.times[i - 1] >= t_last - max_s and s.points[i][1] <= s.points[i - 1][1] + tol:
+            i -= 1
+        return s.times[i]
 
     def is_drawing(self, hand_id):
         return hand_id in self.active
@@ -128,6 +176,7 @@ class Canvas:
         self.strokes = list(self.active.values())
         for s in self.strokes:
             s.points = []
+            s.times = []
             s.drawn = 0
         self._rebuild()
 
@@ -135,6 +184,8 @@ class Canvas:
         self.layer[:] = 0
         self.mask[:] = 0
         active = set(id(s) for s in self.active.values())
+        for s in self.active.values():
+            s.snapshot = None       # el lienzo cambio por debajo del trazo: la copia ya no vale
         for s in self.strokes:
             s.drawn = 0
             if s.points:
